@@ -5,7 +5,7 @@ interface GalleryConfig {
 export const weddingConfig = {
     // 메타 정보
     meta: {
-        title: '종민❤️정인 결혼식에 초대합니다.',
+        title: '종민❤️정민 결혼식에 초대합니다.',
         description: '2027. 3. 27.(일) PM 04:30\n대전 씨엘드레브',
         ogImage: '/images/main-image.png',
         noIndex: true,
