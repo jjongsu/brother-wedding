@@ -32,7 +32,7 @@ export const weddingConfig = {
     // 장소 정보
     venue: {
         name: '씨엘드레브',
-        address: '대전광역시 서구 계룡로 314번길 8(월평동) 씨엘드레브',
+        address: '대전 계룡로 314번길 8(월평동) 씨엘드레브',
         tel: '010-7451-5692',
         naverMapId: '씨엘드레브', // 네이버 지도 검색용 장소명
         coordinates: {
@@ -82,7 +82,7 @@ export const weddingConfig = {
             bank: '토스뱅크',
             number: '123-456-7890',
             holder: '황종민',
-            kakaopay: 'https://link.kakaopay.com/__/ZxDC9dv',
+            kakaopay: 'https://link.kakaopay.com/__/zGIF_va',
         },
         bride: {
             bank: '은행명',
