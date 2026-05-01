@@ -42,12 +42,11 @@ export const weddingConfig = {
         tel: '010-7451-5692',
         naverMapId: '씨엘드레브', // 네이버 지도 검색용 장소명
         coordinates: {
-            latitude: 36.34806,
-            longitude: 127.38355,
+            latitude: 36.353273516,
+            longitude: 127.362831216,
         },
-        placeId: '1599246173', // 네이버 지도 장소 ID
+        placeId: '2015253291', // 네이버 지도 장소 ID
         mapZoom: '17', // 지도 줌 레벨
-        mapNaverCoordinates: '14141300,4507203,15.00,0,0,0,dh', // 네이버 지도 길찾기 URL용 좌표 파라미터 (구 형식)
         transportation: {
             subway: '월평역(한국과학기술원) 2번 출구',
             bus: '간선 101, 103, 105, 107, 116, 119, 213, 312',
