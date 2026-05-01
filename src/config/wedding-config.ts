@@ -15,7 +15,7 @@ export const weddingConfig = {
     main: {
         title: 'Wedding Day',
         image: '/images/main-image.png',
-        date: '2027년 3월 27일 토요일 04시 30분',
+        date: '2027년 3월 27일 토요일 오후 04시 30분',
         venue: '대전 씨엘드레브',
     },
 
