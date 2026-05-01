@@ -6,7 +6,7 @@ export const weddingConfig = {
     // 메타 정보
     meta: {
         title: '종민❤️정민 결혼식에 초대합니다.',
-        description: '2027. 3. 27.(일) PM 04:30\n대전 씨엘드레브',
+        description: '2027. 3. 27.(토) PM 04:30\n대전 씨엘드레브',
         ogImage: '/images/main-image.png',
         noIndex: true,
     },
@@ -15,7 +15,7 @@ export const weddingConfig = {
     main: {
         title: 'Wedding Day',
         image: '/images/main-image.png',
-        date: '2027년 3월 27일 일요일 04시 30분',
+        date: '2027년 3월 27일 토요일 04시 30분',
         venue: '대전 씨엘드레브',
     },
 
@@ -26,7 +26,7 @@ export const weddingConfig = {
         day: 27,
         hour: 4,
         minute: 30,
-        displayDate: '2027.03.27 SUN PM 04:30',
+        displayDate: '2027.03.27 SAT PM 04:30',
     },
 
     // 장소 정보
