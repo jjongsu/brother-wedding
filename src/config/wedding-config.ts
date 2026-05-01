@@ -91,12 +91,12 @@ export const weddingConfig = {
             kakaopay: 'https://link.kakaopay.com/__/ZxDC9dv',
         },
         bride: {
-            bank: '농협은행',
+            bank: '은행명',
             number: '123-456-7890',
             holder: '신정민',
         },
         groomFather: {
-            bank: '농협은행',
+            bank: '은행명',
             number: '123-456-7890',
             holder: '황인철',
         },

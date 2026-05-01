@@ -190,8 +190,8 @@ const AccountSection = ({ bgColor = 'white' }: AccountSectionProps) => {
                     {expandedSide === 'bride' && (
                         <AccountRowsContainer>
                             {renderAccountRow(weddingConfig.account.bride, 'bride', '신부')}
-                            {/* {renderAccountRow(weddingConfig.account.brideFather, 'brideFather', '아버지')} */}
-                            {/* {renderAccountRow(weddingConfig.account.brideMother, 'brideMother', '어머니')} */}
+                            {renderAccountRow(weddingConfig.account.brideFather, 'brideFather', '아버지')}
+                            {renderAccountRow(weddingConfig.account.brideMother, 'brideMother', '어머니')}
                         </AccountRowsContainer>
                     )}
                 </AccountCard>
