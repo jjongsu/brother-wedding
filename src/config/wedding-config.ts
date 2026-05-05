@@ -11,6 +11,13 @@ export const weddingConfig = {
         noIndex: true,
     },
 
+    analytics: {
+        gaStreamName: '모바일청첩장',
+        gaStreamUrl: 'https://jongmin-jungmin-wedding.vercel.app',
+        gaStreamId: '14814272156',
+        gaMeasurementId: 'G-0X4F7TDQNQ',
+    },
+
     // 메인 화면
     main: {
         title: 'Wedding Day',

@@ -3,6 +3,7 @@
 import CacheManager from '@component/CacheManager';
 import { weddingConfig } from '@config/wedding-config';
 import StyledComponentsRegistry from '@lib/registry';
+import { GoogleAnalytics } from '@next/third-parties/google';
 import { GlobalStyle } from '@style/globalStyles';
 
 export default function RootLayout({
@@ -30,6 +31,7 @@ export default function RootLayout({
                     <CacheManager />
                     {children}
                 </StyledComponentsRegistry>
+                <GoogleAnalytics gaId={weddingConfig.analytics.gaMeasurementId} />
             </body>
         </html>
     );
