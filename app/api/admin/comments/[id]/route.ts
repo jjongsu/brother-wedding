@@ -13,6 +13,7 @@ type RouteContext = {
 
 type AdminCommentRow = {
     id: string;
+    parent_id: string | null;
     author: string;
     message: string;
     is_hidden: boolean;
@@ -22,6 +23,7 @@ type AdminCommentRow = {
 
 const toManagedComment = (comment: AdminCommentRow) => ({
     id: comment.id,
+    parentId: comment.parent_id,
     author: comment.author,
     message: comment.message,
     createdAt: comment.created_at,
@@ -65,7 +67,7 @@ export async function PATCH(request: Request, context: RouteContext) {
                 updated_at: new Date().toISOString(),
             })
             .eq('id', id)
-            .select('id, author, message, is_hidden, created_at, updated_at')
+            .select('id, parent_id, author, message, is_hidden, created_at, updated_at')
             .maybeSingle();
 
         if (error) {

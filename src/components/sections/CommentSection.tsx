@@ -55,6 +55,7 @@ const COMMENT_CLIENT_KEY_STORAGE_KEY = 'brother-wedding-comment-client-key';
 const COMMENT_SUBMIT_RETRY_MESSAGE = '축하 메시지 등록에 실패 했습니다. 잠시 후 다시 시도해주세요.';
 const REPLY_SUBMIT_RETRY_MESSAGE = '답글 등록에 실패 했습니다. 잠시 후 다시 시도해주세요.';
 const REACTION_RETRY_MESSAGE = '리액션을 반영하지 못했습니다. 잠시 후 다시 시도해주세요.';
+const COMMENT_SKELETON_COUNT = 3;
 
 const REACTION_OPTIONS = [
     { type: 'like', icon: '👍', label: '좋아요' },
@@ -862,7 +863,7 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                 </CommentToolbar>
 
                 <CommentList>
-                    {isLoading && <StateMessage>댓글을 불러오는 중입니다.</StateMessage>}
+                    {isLoading && <CommentSkeletonList />}
                     {!isLoading && listError && <StateMessage role="alert">{listError}</StateMessage>}
                     {!isLoading && !listError && comments.length === 0 && <StateMessage>아직 남겨진 메시지가 없습니다.</StateMessage>}
 
@@ -904,6 +905,28 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
             </CommentLayout>
             {toastMessage && <ToastMessage role="status">{toastMessage}</ToastMessage>}
         </CommentSectionContainer>
+    );
+}
+
+function CommentSkeletonList() {
+    return (
+        <SkeletonGroup role="status" aria-label="댓글을 불러오는 중입니다.">
+            {Array.from({ length: COMMENT_SKELETON_COUNT }, (_, index) => (
+                <CommentSkeletonItem key={index} $delay={index * 0.08}>
+                    <SkeletonHeader>
+                        <SkeletonLine $width="5.8rem" $height="0.9rem" />
+                        <SkeletonLine $width="4.6rem" $height="0.72rem" />
+                    </SkeletonHeader>
+                    <SkeletonLine $width="100%" />
+                    <SkeletonLine $width="82%" />
+                    <SkeletonReactionRow>
+                        <SkeletonPill />
+                        <SkeletonPill />
+                        <SkeletonPill />
+                    </SkeletonReactionRow>
+                </CommentSkeletonItem>
+            ))}
+        </SkeletonGroup>
     );
 }
 
@@ -1123,6 +1146,76 @@ const CommentList = styled.div`
     display: flex;
     flex-direction: column;
     gap: 0.8rem;
+`;
+
+const SkeletonGroup = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+`;
+
+const CommentSkeletonItem = styled.article<{ $delay: number }>`
+    padding: 1.15rem 1.25rem;
+    border-radius: 8px;
+    background-color: white;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    animation: skeletonPulse 1.35s ease-in-out infinite;
+    animation-delay: ${(props) => props.$delay}s;
+
+    @keyframes skeletonPulse {
+        0%,
+        100% {
+            opacity: 0.72;
+        }
+        50% {
+            opacity: 1;
+        }
+    }
+`;
+
+const SkeletonHeader = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+`;
+
+const SkeletonLine = styled.span<{ $width: string; $height?: string }>`
+    display: block;
+    width: ${(props) => props.$width};
+    max-width: 100%;
+    height: ${(props) => props.$height ?? '0.82rem'};
+    border-radius: 999px;
+    margin-top: 0.55rem;
+    background: linear-gradient(90deg, #f2ece4 0%, #fbf7f1 48%, #f2ece4 100%);
+    background-size: 200% 100%;
+    animation: skeletonShimmer 1.2s ease-in-out infinite;
+
+    @keyframes skeletonShimmer {
+        from {
+            background-position: 120% 0;
+        }
+        to {
+            background-position: -120% 0;
+        }
+    }
+`;
+
+const SkeletonReactionRow = styled.div`
+    display: flex;
+    gap: 0.35rem;
+    margin-top: 0.95rem;
+`;
+
+const SkeletonPill = styled.span`
+    display: block;
+    width: 2.65rem;
+    height: 2rem;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #f2ece4 0%, #fbf7f1 48%, #f2ece4 100%);
+    background-size: 200% 100%;
+    animation: skeletonShimmer 1.2s ease-in-out infinite;
 `;
 
 const StateMessage = styled.p`
