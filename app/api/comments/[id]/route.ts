@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyCommentPassword } from '@lib/comments/password';
+import { createEmptyCommentReactionCounts } from '@lib/comments/reactions';
 import { checkRateLimit } from '@lib/rate-limit';
 import { createSupabaseAdminClient } from '@lib/supabase/server';
 
@@ -14,11 +15,13 @@ type RouteContext = {
 
 type PrivateCommentRow = {
     id: string;
+    parent_id: string | null;
     password_hash: string | null;
 };
 
 type CommentRow = {
     id: string;
+    parent_id: string | null;
     author: string;
     message: string;
     created_at: string;
@@ -26,9 +29,13 @@ type CommentRow = {
 
 const toPublicComment = (comment: CommentRow) => ({
     id: comment.id,
+    parentId: comment.parent_id,
     author: comment.author,
     message: comment.message,
     createdAt: comment.created_at,
+    reactions: createEmptyCommentReactionCounts(),
+    myReactions: [],
+    replies: [],
 });
 
 const getTrimmedString = (value: unknown) => {
@@ -51,7 +58,7 @@ const findCommentForAuth = async (id: string) => {
     const supabase = createSupabaseAdminClient();
     const { data, error } = await supabase
         .from('comments')
-        .select('id, password_hash')
+        .select('id, parent_id, password_hash')
         .eq('id', id)
         .eq('is_hidden', false)
         .maybeSingle();
@@ -114,7 +121,7 @@ export async function PATCH(request: Request, context: RouteContext) {
                 updated_at: new Date().toISOString(),
             })
             .eq('id', id)
-            .select('id, author, message, created_at')
+            .select('id, parent_id, author, message, created_at')
             .single();
 
         if (error) {
@@ -172,17 +179,33 @@ export async function DELETE(request: Request, context: RouteContext) {
             return NextResponse.json({ error: '삭제 권한이 없습니다.' }, { status: 401 });
         }
 
+        const now = new Date().toISOString();
         const { error } = await supabase
             .from('comments')
             .update({
                 is_hidden: true,
-                updated_at: new Date().toISOString(),
+                updated_at: now,
             })
             .eq('id', id);
 
         if (error) {
             console.error('댓글 삭제 오류:', error);
             return NextResponse.json({ error: '댓글을 삭제하지 못했습니다.' }, { status: 500 });
+        }
+
+        if (!comment.parent_id) {
+            const { error: replyError } = await supabase
+                .from('comments')
+                .update({
+                    is_hidden: true,
+                    updated_at: now,
+                })
+                .eq('parent_id', id);
+
+            if (replyError) {
+                console.error('답글 삭제 오류:', replyError);
+                return NextResponse.json({ error: '댓글을 삭제하지 못했습니다.' }, { status: 500 });
+            }
         }
 
         return NextResponse.json({ ok: true });

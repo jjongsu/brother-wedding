@@ -1,15 +1,36 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+    normalizeCommentReactionCounts,
+    normalizeCommentReactionList,
+    type CommentReactionCounts,
+    type CommentReactionType,
+} from '@lib/comments/reactions';
 import styled from 'styled-components';
 
 type CommentSectionProps = BaseComponentProps;
 
-type GuestComment = {
+type ApiGuestComment = {
     id: string;
+    parentId?: string | null;
     author: string;
     message: string;
     createdAt: string;
+    reactions?: Partial<Record<CommentReactionType, number>>;
+    myReactions?: unknown[];
+    replies?: ApiGuestComment[];
+};
+
+type GuestComment = {
+    id: string;
+    parentId: string | null;
+    author: string;
+    message: string;
+    createdAt: string;
+    reactions: CommentReactionCounts;
+    myReactions: CommentReactionType[];
+    replies: GuestComment[];
 };
 
 type CommentAction = {
@@ -18,16 +39,72 @@ type CommentAction = {
 } | null;
 
 type CommentsResponse = {
-    comments?: GuestComment[];
-    comment?: GuestComment;
+    comments?: ApiGuestComment[];
+    comment?: ApiGuestComment;
     error?: string;
 };
 
-const getResponseBody = async (response: Response): Promise<CommentsResponse | null> => {
+type ReactionResponse = {
+    commentId?: string;
+    reactions?: Partial<Record<CommentReactionType, number>>;
+    myReactions?: unknown[];
+    error?: string;
+};
+
+const COMMENT_CLIENT_KEY_STORAGE_KEY = 'brother-wedding-comment-client-key';
+
+const REACTION_OPTIONS = [
+    { type: 'like', icon: '👍', label: '좋아요' },
+    { type: 'heart', icon: '❤️', label: '하트' },
+    { type: 'clap', icon: '👏', label: '박수' },
+    { type: 'celebrate', icon: '🎉', label: '축하' },
+] as const satisfies ReadonlyArray<{
+    type: CommentReactionType;
+    icon: string;
+    label: string;
+}>;
+
+const getResponseBody = async <T,>(response: Response): Promise<T | null> => {
     try {
-        return (await response.json()) as CommentsResponse;
+        return (await response.json()) as T;
     } catch {
         return null;
+    }
+};
+
+const normalizeComment = (comment: ApiGuestComment): GuestComment => ({
+    id: comment.id,
+    parentId: comment.parentId ?? null,
+    author: comment.author,
+    message: comment.message,
+    createdAt: comment.createdAt,
+    reactions: normalizeCommentReactionCounts(comment.reactions),
+    myReactions: normalizeCommentReactionList(comment.myReactions),
+    replies: (comment.replies ?? []).map(normalizeComment),
+});
+
+const createFallbackClientKey = () => {
+    return `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const getOrCreateClientKey = () => {
+    if (typeof window === 'undefined') return '';
+
+    try {
+        const storedClientKey = window.localStorage.getItem(COMMENT_CLIENT_KEY_STORAGE_KEY)?.trim();
+
+        if (storedClientKey && storedClientKey.length >= 8 && storedClientKey.length <= 80) {
+            return storedClientKey;
+        }
+
+        const nextClientKey =
+            typeof window.crypto?.randomUUID === 'function' ? window.crypto.randomUUID() : createFallbackClientKey();
+
+        window.localStorage.setItem(COMMENT_CLIENT_KEY_STORAGE_KEY, nextClientKey);
+
+        return nextClientKey;
+    } catch {
+        return createFallbackClientKey();
     }
 };
 
@@ -48,40 +125,104 @@ const formatDate = (value: string) => {
         .replace(/\.$/, '');
 };
 
-const fetchComments = async () => {
-    const response = await fetch('/api/comments', {
+const countComments = (comments: GuestComment[]): number => {
+    return comments.reduce((total, comment) => total + 1 + countComments(comment.replies), 0);
+};
+
+const fetchComments = async (clientKey?: string) => {
+    const query = clientKey ? `?clientKey=${encodeURIComponent(clientKey)}` : '';
+    const response = await fetch(`/api/comments${query}`, {
         cache: 'no-store',
     });
-    const body = await getResponseBody(response);
+    const body = await getResponseBody<CommentsResponse>(response);
 
     if (!response.ok) {
         throw new Error(body?.error ?? '댓글 목록을 불러오지 못했습니다.');
     }
 
-    return body?.comments ?? [];
+    return (body?.comments ?? []).map(normalizeComment);
+};
+
+const updateCommentInTree = (
+    comments: GuestComment[],
+    commentId: string,
+    updater: (comment: GuestComment) => GuestComment,
+): GuestComment[] => {
+    return comments.map((comment) => {
+        if (comment.id === commentId) {
+            return updater(comment);
+        }
+
+        return {
+            ...comment,
+            replies: updateCommentInTree(comment.replies, commentId, updater),
+        };
+    });
+};
+
+const removeCommentFromTree = (comments: GuestComment[], commentId: string): GuestComment[] => {
+    return comments
+        .filter((comment) => comment.id !== commentId)
+        .map((comment) => ({
+            ...comment,
+            replies: removeCommentFromTree(comment.replies, commentId),
+        }));
+};
+
+const insertCommentInTree = (comments: GuestComment[], nextComment: GuestComment): GuestComment[] => {
+    if (!nextComment.parentId) {
+        return [nextComment, ...comments];
+    }
+
+    return comments.map((comment) => {
+        if (comment.id === nextComment.parentId) {
+            return {
+                ...comment,
+                replies: [...comment.replies, nextComment],
+            };
+        }
+
+        return {
+            ...comment,
+            replies: insertCommentInTree(comment.replies, nextComment),
+        };
+    });
 };
 
 export default function CommentSection({ bgColor = 'white' }: CommentSectionProps) {
     const [comments, setComments] = useState<GuestComment[]>([]);
+    const [clientKey, setClientKey] = useState('');
     const [author, setAuthor] = useState('');
     const [password, setPassword] = useState('');
     const [message, setMessage] = useState('');
+    const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
+    const [expandedReplyIds, setExpandedReplyIds] = useState<Set<string>>(() => new Set());
+    const [replyAuthor, setReplyAuthor] = useState('');
+    const [replyPassword, setReplyPassword] = useState('');
+    const [replyMessage, setReplyMessage] = useState('');
     const [activeAction, setActiveAction] = useState<CommentAction>(null);
     const [actionPassword, setActionPassword] = useState('');
     const [editMessage, setEditMessage] = useState('');
+    const [pendingReaction, setPendingReaction] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isReplySubmitting, setIsReplySubmitting] = useState(false);
     const [isActionSubmitting, setIsActionSubmitting] = useState(false);
     const [formError, setFormError] = useState('');
+    const [replyError, setReplyError] = useState('');
     const [listError, setListError] = useState('');
     const [actionError, setActionError] = useState('');
+    const [reactionError, setReactionError] = useState('');
+
+    const totalCommentCount = useMemo(() => countComments(comments), [comments]);
 
     const loadComments = useCallback(async () => {
         setIsLoading(true);
         setListError('');
+        setReactionError('');
 
         try {
-            const nextComments = await fetchComments();
+            const nextComments = await fetchComments(clientKey);
 
             setComments(nextComments);
         } catch (error) {
@@ -89,20 +230,24 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [clientKey]);
 
     useEffect(() => {
         let isMounted = true;
 
         const loadInitialComments = async () => {
+            const nextClientKey = getOrCreateClientKey();
+
             try {
-                const nextComments = await fetchComments();
+                const nextComments = await fetchComments(nextClientKey);
 
                 if (!isMounted) return;
 
+                setClientKey(nextClientKey);
                 setComments(nextComments);
             } catch (error) {
                 if (isMounted) {
+                    setClientKey(nextClientKey);
                     setListError(error instanceof Error ? error.message : '댓글 목록을 불러오지 못했습니다.');
                 }
             } finally {
@@ -126,11 +271,44 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
         setFormError('');
     };
 
+    const resetReply = () => {
+        setReplyTargetId(null);
+        setReplyAuthor('');
+        setReplyPassword('');
+        setReplyMessage('');
+        setReplyError('');
+    };
+
     const resetAction = () => {
         setActiveAction(null);
         setActionPassword('');
         setEditMessage('');
         setActionError('');
+    };
+
+    const expandReplies = (commentId: string) => {
+        setExpandedReplyIds((currentIds) => {
+            if (currentIds.has(commentId)) return currentIds;
+
+            const nextIds = new Set(currentIds);
+            nextIds.add(commentId);
+
+            return nextIds;
+        });
+    };
+
+    const toggleReplies = (commentId: string) => {
+        setExpandedReplyIds((currentIds) => {
+            const nextIds = new Set(currentIds);
+
+            if (nextIds.has(commentId)) {
+                nextIds.delete(commentId);
+            } else {
+                nextIds.add(commentId);
+            }
+
+            return nextIds;
+        });
     };
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -165,13 +343,13 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                     message: trimmedMessage,
                 }),
             });
-            const body = await getResponseBody(response);
+            const body = await getResponseBody<CommentsResponse>(response);
 
             if (!response.ok || !body?.comment) {
                 throw new Error(body?.error ?? '댓글을 등록하지 못했습니다.');
             }
 
-            setComments((currentComments) => [body.comment as GuestComment, ...currentComments]);
+            setComments((currentComments) => insertCommentInTree(currentComments, normalizeComment(body.comment as ApiGuestComment)));
             resetForm();
         } catch (error) {
             setFormError(error instanceof Error ? error.message : '댓글을 등록하지 못했습니다.');
@@ -180,11 +358,115 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
         }
     };
 
+    const handleReplySubmit = async (event: FormEvent<HTMLFormElement>, parentId: string) => {
+        event.preventDefault();
+
+        const trimmedAuthor = replyAuthor.trim();
+        const trimmedPassword = replyPassword.trim();
+        const trimmedMessage = replyMessage.trim();
+
+        if (!trimmedAuthor || !trimmedPassword || !trimmedMessage) {
+            setReplyError('이름, 비밀번호, 답글을 모두 입력해주세요.');
+            return;
+        }
+
+        if (trimmedPassword.length < 4) {
+            setReplyError('비밀번호는 4자 이상 입력해주세요.');
+            return;
+        }
+
+        setIsReplySubmitting(true);
+        setReplyError('');
+
+        try {
+            const response = await fetch('/api/comments', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    parentId,
+                    author: trimmedAuthor,
+                    password: trimmedPassword,
+                    message: trimmedMessage,
+                }),
+            });
+            const body = await getResponseBody<CommentsResponse>(response);
+
+            if (!response.ok || !body?.comment) {
+                throw new Error(body?.error ?? '답글을 등록하지 못했습니다.');
+            }
+
+            setComments((currentComments) => insertCommentInTree(currentComments, normalizeComment(body.comment as ApiGuestComment)));
+            expandReplies(parentId);
+            resetReply();
+        } catch (error) {
+            setReplyError(error instanceof Error ? error.message : '답글을 등록하지 못했습니다.');
+        } finally {
+            setIsReplySubmitting(false);
+        }
+    };
+
+    const openReply = (comment: GuestComment) => {
+        if (replyTargetId === comment.id) {
+            resetReply();
+            return;
+        }
+
+        resetAction();
+        setReplyTargetId(comment.id);
+        expandReplies(comment.id);
+        setReplyAuthor('');
+        setReplyPassword('');
+        setReplyMessage('');
+        setReplyError('');
+    };
+
     const openAction = (comment: GuestComment, mode: 'edit' | 'delete') => {
+        resetReply();
         setActiveAction({ id: comment.id, mode });
         setActionPassword('');
         setEditMessage(comment.message);
         setActionError('');
+    };
+
+    const handleReaction = async (commentId: string, reaction: CommentReactionType) => {
+        if (!clientKey) return;
+
+        const pendingKey = `${commentId}:${reaction}`;
+
+        setPendingReaction(pendingKey);
+        setReactionError('');
+
+        try {
+            const response = await fetch(`/api/comments/${commentId}/reactions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    reaction,
+                    clientKey,
+                }),
+            });
+            const body = await getResponseBody<ReactionResponse>(response);
+
+            if (!response.ok) {
+                throw new Error(body?.error ?? '리액션을 반영하지 못했습니다.');
+            }
+
+            setComments((currentComments) =>
+                updateCommentInTree(currentComments, commentId, (comment) => ({
+                    ...comment,
+                    reactions: normalizeCommentReactionCounts(body?.reactions),
+                    myReactions: normalizeCommentReactionList(body?.myReactions),
+                })),
+            );
+        } catch (error) {
+            setReactionError(error instanceof Error ? error.message : '리액션을 반영하지 못했습니다.');
+        } finally {
+            setPendingReaction(null);
+        }
     };
 
     const handleEdit = async () => {
@@ -212,14 +494,21 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                     password: trimmedPassword,
                 }),
             });
-            const body = await getResponseBody(response);
+            const body = await getResponseBody<CommentsResponse>(response);
 
             if (!response.ok || !body?.comment) {
                 throw new Error(body?.error ?? '댓글을 수정하지 못했습니다.');
             }
 
+            const nextComment = normalizeComment(body.comment);
+
             setComments((currentComments) =>
-                currentComments.map((comment) => (comment.id === activeAction.id ? (body.comment as GuestComment) : comment)),
+                updateCommentInTree(currentComments, activeAction.id, (comment) => ({
+                    ...comment,
+                    author: nextComment.author,
+                    message: nextComment.message,
+                    createdAt: nextComment.createdAt,
+                })),
             );
             resetAction();
         } catch (error) {
@@ -252,13 +541,13 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                     password: trimmedPassword,
                 }),
             });
-            const body = await getResponseBody(response);
+            const body = await getResponseBody<CommentsResponse>(response);
 
             if (!response.ok) {
                 throw new Error(body?.error ?? '댓글을 삭제하지 못했습니다.');
             }
 
-            setComments((currentComments) => currentComments.filter((comment) => comment.id !== activeAction.id));
+            setComments((currentComments) => removeCommentFromTree(currentComments, activeAction.id));
             resetAction();
         } catch (error) {
             setActionError(error instanceof Error ? error.message : '댓글을 삭제하지 못했습니다.');
@@ -266,6 +555,181 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
             setIsActionSubmitting(false);
         }
     };
+
+    const renderReactionBar = (comment: GuestComment) => (
+        <ReactionGroup aria-label="리액션">
+            {REACTION_OPTIONS.map((reaction) => {
+                const pendingKey = `${comment.id}:${reaction.type}`;
+                const isActive = comment.myReactions.includes(reaction.type);
+                const count = comment.reactions[reaction.type];
+
+                return (
+                    <ReactionButton
+                        key={reaction.type}
+                        type="button"
+                        aria-label={`${reaction.label} ${isActive ? '취소' : '남기기'}`}
+                        aria-pressed={isActive}
+                        $active={isActive}
+                        onClick={() => handleReaction(comment.id, reaction.type)}
+                        disabled={!clientKey || pendingReaction === pendingKey}
+                    >
+                        <ReactionIcon aria-hidden="true">{reaction.icon}</ReactionIcon>
+                        <ReactionCount>{count}</ReactionCount>
+                    </ReactionButton>
+                );
+            })}
+        </ReactionGroup>
+    );
+
+    const renderActionPanel = () => {
+        if (!activeAction) return null;
+
+        return (
+            <ActionPanel>
+                {activeAction.mode === 'edit' ? (
+                    <>
+                        <PanelTextarea
+                            value={editMessage}
+                            onChange={(event) => setEditMessage(event.target.value)}
+                            maxLength={500}
+                            disabled={isActionSubmitting}
+                        />
+                        <PanelInput
+                            type="password"
+                            value={actionPassword}
+                            onChange={(event) => setActionPassword(event.target.value)}
+                            autoComplete="current-password"
+                            placeholder="댓글 비밀번호"
+                            disabled={isActionSubmitting}
+                        />
+                        {actionError && <FeedbackText role="alert">{actionError}</FeedbackText>}
+                        <PanelActions>
+                            <PanelButton type="button" onClick={handleEdit} disabled={isActionSubmitting}>
+                                {isActionSubmitting ? '저장 중...' : '저장'}
+                            </PanelButton>
+                            <GhostButton type="button" onClick={resetAction} disabled={isActionSubmitting}>
+                                취소
+                            </GhostButton>
+                        </PanelActions>
+                    </>
+                ) : (
+                    <>
+                        <DeleteText>이 메시지를 삭제할까요?</DeleteText>
+                        <PanelInput
+                            type="password"
+                            value={actionPassword}
+                            onChange={(event) => setActionPassword(event.target.value)}
+                            autoComplete="current-password"
+                            placeholder="댓글 비밀번호"
+                            disabled={isActionSubmitting}
+                        />
+                        {actionError && <FeedbackText role="alert">{actionError}</FeedbackText>}
+                        <PanelActions>
+                            <DangerButton type="button" onClick={handleDelete} disabled={isActionSubmitting}>
+                                {isActionSubmitting ? '삭제 중...' : '삭제'}
+                            </DangerButton>
+                            <GhostButton type="button" onClick={resetAction} disabled={isActionSubmitting}>
+                                취소
+                            </GhostButton>
+                        </PanelActions>
+                    </>
+                )}
+            </ActionPanel>
+        );
+    };
+
+    const renderCommentContent = (comment: GuestComment, isReply = false) => {
+        const isActive = activeAction?.id === comment.id;
+
+        return (
+            <>
+                <CommentHeader $compact={isReply}>
+                    <CommentAuthor>{comment.author}</CommentAuthor>
+                    <CommentDate dateTime={comment.createdAt}>{formatDate(comment.createdAt)}</CommentDate>
+                </CommentHeader>
+                <CommentMessage>{comment.message}</CommentMessage>
+
+                <CommentMetaRow>
+                    {renderReactionBar(comment)}
+
+                    <CommentActions>
+                        {!isReply && (
+                            <TextButton type="button" onClick={() => openReply(comment)} disabled={isReplySubmitting}>
+                                {replyTargetId === comment.id ? '닫기' : '답글'}
+                            </TextButton>
+                        )}
+                        <TextButton type="button" onClick={() => openAction(comment, 'edit')} disabled={isActionSubmitting}>
+                            수정
+                        </TextButton>
+                        <TextButton type="button" onClick={() => openAction(comment, 'delete')} disabled={isActionSubmitting}>
+                            삭제
+                        </TextButton>
+                    </CommentActions>
+                </CommentMetaRow>
+
+                {isActive && renderActionPanel()}
+            </>
+        );
+    };
+
+    const renderReplyForm = (comment: GuestComment) => (
+        <ReplyForm onSubmit={(event) => handleReplySubmit(event, comment.id)}>
+            <ReplyFormTitle>{comment.author}님에게 답글</ReplyFormTitle>
+            <FieldGroup>
+                <CompactField>
+                    <FieldLabel htmlFor={`reply-author-${comment.id}`}>이름</FieldLabel>
+                    <TextInput
+                        id={`reply-author-${comment.id}`}
+                        value={replyAuthor}
+                        onChange={(event) => setReplyAuthor(event.target.value)}
+                        maxLength={40}
+                        autoComplete="name"
+                        placeholder="이름"
+                        disabled={isReplySubmitting}
+                    />
+                </CompactField>
+
+                <CompactField>
+                    <FieldLabel htmlFor={`reply-password-${comment.id}`}>비밀번호</FieldLabel>
+                    <TextInput
+                        id={`reply-password-${comment.id}`}
+                        type="password"
+                        value={replyPassword}
+                        onChange={(event) => setReplyPassword(event.target.value)}
+                        maxLength={40}
+                        autoComplete="new-password"
+                        placeholder="수정/삭제용"
+                        disabled={isReplySubmitting}
+                    />
+                </CompactField>
+            </FieldGroup>
+
+            <Field>
+                <FieldLabel htmlFor={`reply-message-${comment.id}`}>답글</FieldLabel>
+                <ReplyInput
+                    id={`reply-message-${comment.id}`}
+                    value={replyMessage}
+                    onChange={(event) => setReplyMessage(event.target.value)}
+                    maxLength={500}
+                    placeholder="답글을 적어주세요."
+                    disabled={isReplySubmitting}
+                />
+            </Field>
+
+            <FormFooter>
+                <CountText>{replyMessage.length}/500</CountText>
+                <PanelActions>
+                    <GhostButton type="button" onClick={resetReply} disabled={isReplySubmitting}>
+                        취소
+                    </GhostButton>
+                    <PanelButton type="submit" disabled={isReplySubmitting}>
+                        {isReplySubmitting ? '등록 중...' : '답글 등록'}
+                    </PanelButton>
+                </PanelActions>
+            </FormFooter>
+            {replyError && <FeedbackText role="alert">{replyError}</FeedbackText>}
+        </ReplyForm>
+    );
 
     return (
         <CommentSectionContainer $bgColor={bgColor}>
@@ -325,11 +789,12 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                 </CommentForm>
 
                 <CommentToolbar>
-                    <CommentCount>방명록 {comments.length}개</CommentCount>
+                    <CommentCount>방명록 {totalCommentCount}개</CommentCount>
                     <RefreshButton type="button" onClick={loadComments} disabled={isLoading}>
                         새로고침
                     </RefreshButton>
                 </CommentToolbar>
+                {reactionError && <InlineFeedback role="alert">{reactionError}</InlineFeedback>}
 
                 <CommentList>
                     {isLoading && <StateMessage>댓글을 불러오는 중입니다.</StateMessage>}
@@ -339,76 +804,33 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                     {!isLoading &&
                         !listError &&
                         comments.map((comment) => {
-                            const isActive = activeAction?.id === comment.id;
+                            const isRepliesExpanded = expandedReplyIds.has(comment.id);
+                            const replyListId = `reply-list-${comment.id}`;
 
                             return (
                                 <CommentItem key={comment.id}>
-                                    <CommentHeader>
-                                        <CommentAuthor>{comment.author}</CommentAuthor>
-                                        <CommentDate dateTime={comment.createdAt}>{formatDate(comment.createdAt)}</CommentDate>
-                                    </CommentHeader>
-                                    <CommentMessage>{comment.message}</CommentMessage>
+                                    {renderCommentContent(comment)}
 
-                                    <CommentActions>
-                                        <TextButton type="button" onClick={() => openAction(comment, 'edit')} disabled={isActionSubmitting}>
-                                            수정
-                                        </TextButton>
-                                        <TextButton type="button" onClick={() => openAction(comment, 'delete')} disabled={isActionSubmitting}>
-                                            삭제
-                                        </TextButton>
-                                    </CommentActions>
+                                    {comment.replies.length > 0 && (
+                                        <ReplyToggleButton
+                                            type="button"
+                                            aria-controls={replyListId}
+                                            aria-expanded={isRepliesExpanded}
+                                            onClick={() => toggleReplies(comment.id)}
+                                        >
+                                            <ReplyToggleIcon $expanded={isRepliesExpanded} aria-hidden="true" />
+                                            {isRepliesExpanded ? `답글 ${comment.replies.length}개 접기` : `답글 ${comment.replies.length}개 보기`}
+                                        </ReplyToggleButton>
+                                    )}
 
-                                    {isActive && (
-                                        <ActionPanel>
-                                            {activeAction.mode === 'edit' ? (
-                                                <>
-                                                    <PanelTextarea
-                                                        value={editMessage}
-                                                        onChange={(event) => setEditMessage(event.target.value)}
-                                                        maxLength={500}
-                                                        disabled={isActionSubmitting}
-                                                    />
-                                                    <PanelInput
-                                                        type="password"
-                                                        value={actionPassword}
-                                                        onChange={(event) => setActionPassword(event.target.value)}
-                                                        autoComplete="current-password"
-                                                        placeholder="댓글 비밀번호"
-                                                        disabled={isActionSubmitting}
-                                                    />
-                                                    {actionError && <FeedbackText role="alert">{actionError}</FeedbackText>}
-                                                    <PanelActions>
-                                                        <PanelButton type="button" onClick={handleEdit} disabled={isActionSubmitting}>
-                                                            {isActionSubmitting ? '저장 중...' : '저장'}
-                                                        </PanelButton>
-                                                        <GhostButton type="button" onClick={resetAction} disabled={isActionSubmitting}>
-                                                            취소
-                                                        </GhostButton>
-                                                    </PanelActions>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <DeleteText>이 메시지를 삭제할까요?</DeleteText>
-                                                    <PanelInput
-                                                        type="password"
-                                                        value={actionPassword}
-                                                        onChange={(event) => setActionPassword(event.target.value)}
-                                                        autoComplete="current-password"
-                                                        placeholder="댓글 비밀번호"
-                                                        disabled={isActionSubmitting}
-                                                    />
-                                                    {actionError && <FeedbackText role="alert">{actionError}</FeedbackText>}
-                                                    <PanelActions>
-                                                        <DangerButton type="button" onClick={handleDelete} disabled={isActionSubmitting}>
-                                                            {isActionSubmitting ? '삭제 중...' : '삭제'}
-                                                        </DangerButton>
-                                                        <GhostButton type="button" onClick={resetAction} disabled={isActionSubmitting}>
-                                                            취소
-                                                        </GhostButton>
-                                                    </PanelActions>
-                                                </>
-                                            )}
-                                        </ActionPanel>
+                                    {replyTargetId === comment.id && renderReplyForm(comment)}
+
+                                    {comment.replies.length > 0 && isRepliesExpanded && (
+                                        <ReplyList id={replyListId}>
+                                            {comment.replies.map((reply) => (
+                                                <ReplyItem key={reply.id}>{renderCommentContent(reply, true)}</ReplyItem>
+                                            ))}
+                                        </ReplyList>
                                     )}
                                 </CommentItem>
                             );
@@ -454,7 +876,7 @@ const SectionIntro = styled.p`
 `;
 
 const CommentLayout = styled.div`
-    max-width: 40rem;
+    max-width: 42rem;
     margin: 0 auto;
     text-align: left;
 `;
@@ -535,6 +957,10 @@ const MessageInput = styled.textarea`
     font-size: 0.95rem;
     line-height: 1.7;
     box-sizing: border-box;
+`;
+
+const ReplyInput = styled(MessageInput)`
+    min-height: 5.25rem;
 `;
 
 const FormFooter = styled.div`
@@ -664,12 +1090,71 @@ const CommentItem = styled.article`
     }
 `;
 
-const CommentHeader = styled.div`
+const ReplyToggleButton = styled.button`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.9rem;
+    border: none;
+    padding: 0;
+    background: none;
+    color: var(--text-light);
+    font-family: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: color 0.2s ease;
+
+    &:hover {
+        color: var(--secondary-color);
+    }
+`;
+
+const ReplyToggleIcon = styled.span<{ $expanded: boolean }>`
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(${(props) => (props.$expanded ? '45deg' : '-45deg')});
+    transition: transform 0.2s ease;
+`;
+
+const ReplyList = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.95rem;
+    margin-top: 1rem;
+    padding-left: 1rem;
+    border-left: 1px solid #eadfd3;
+    animation: repliesReveal 0.24s ease both;
+
+    @media (max-width: 420px) {
+        padding-left: 0.75rem;
+    }
+
+    @keyframes repliesReveal {
+        from {
+            opacity: 0;
+            transform: translateY(-4px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+`;
+
+const ReplyItem = styled.article`
+    padding: 0.05rem 0 0.05rem 0.75rem;
+`;
+
+const CommentHeader = styled.div<{ $compact?: boolean }>`
     display: flex;
     justify-content: space-between;
     gap: 1rem;
     align-items: baseline;
-    margin-bottom: 0.6rem;
+    margin-bottom: ${(props) => (props.$compact ? '0.45rem' : '0.6rem')};
 
     @media (max-width: 420px) {
         align-items: flex-start;
@@ -701,11 +1186,80 @@ const CommentMessage = styled.p`
     word-break: keep-all;
 `;
 
+const CommentMetaRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.85rem;
+    margin-top: 0.8rem;
+
+    @media (max-width: 520px) {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.7rem;
+    }
+`;
+
+const ReactionGroup = styled.div`
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+`;
+
+const ReactionButton = styled.button<{ $active: boolean }>`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    min-width: 2.65rem;
+    height: 2rem;
+    border: 1px solid ${(props) => (props.$active ? '#d9b28a' : '#efe6db')};
+    border-radius: 6px;
+    padding: 0 0.45rem;
+    background-color: ${(props) => (props.$active ? '#fff2e4' : '#fffdfb')};
+    color: var(--text-medium);
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+        border-color 0.2s ease,
+        background-color 0.2s ease,
+        transform 0.2s ease;
+
+    &:hover {
+        border-color: var(--secondary-color);
+        background-color: #fff8f0;
+    }
+
+    &:active {
+        transform: translateY(1px);
+    }
+
+    &:disabled {
+        cursor: not-allowed;
+        opacity: 0.62;
+        transform: none;
+    }
+`;
+
+const ReactionIcon = styled.span`
+    font-size: 0.95rem;
+    line-height: 1;
+`;
+
+const ReactionCount = styled.span`
+    min-width: 0.75rem;
+    color: var(--text-light);
+    font-size: 0.76rem;
+    line-height: 1;
+    text-align: center;
+`;
+
 const CommentActions = styled.div`
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 0.7rem;
-    margin-top: 0.8rem;
+    white-space: nowrap;
 `;
 
 const TextButton = styled.button`
@@ -726,6 +1280,21 @@ const TextButton = styled.button`
         cursor: not-allowed;
         opacity: 0.5;
     }
+`;
+
+const ReplyForm = styled.form`
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #f0e9df;
+`;
+
+const ReplyFormTitle = styled.p`
+    margin: 0;
+    color: var(--text-medium);
+    font-size: 0.84rem;
 `;
 
 const ActionPanel = styled.div`
@@ -798,4 +1367,8 @@ const FeedbackText = styled.p`
     color: #b98275;
     font-size: 0.82rem;
     line-height: 1.6;
+`;
+
+const InlineFeedback = styled(FeedbackText)`
+    margin: -0.2rem 0 0.75rem;
 `;
