@@ -491,26 +491,16 @@ export default function AdminPage() {
                                         <StatusBadge $status={comment.status}>{comment.status === 'visible' ? '보임' : '숨김'}</StatusBadge>
                                     </CommentMeta>
                                     {commentKind === 'reply' && (
-                                        <ReplyContext>
-                                            답글 대상: {comment.parentAuthor ? `${comment.parentAuthor}님의 댓글` : '원댓글 정보 없음'}
-                                        </ReplyContext>
+                                        <ReplyContext>답글 대상: {comment.parentAuthor ? `${comment.parentAuthor}님의 댓글` : '원댓글 정보 없음'}</ReplyContext>
                                     )}
                                     <CommentMessage>{comment.message}</CommentMessage>
                                     <ActionGroup>
                                         {comment.status === 'visible' ? (
-                                            <SecondaryButton
-                                                type="button"
-                                                onClick={() => updateCommentStatus(comment.id, 'hidden')}
-                                                disabled={isPending}
-                                            >
+                                            <SecondaryButton type="button" onClick={() => updateCommentStatus(comment.id, 'hidden')} disabled={isPending}>
                                                 숨김
                                             </SecondaryButton>
                                         ) : (
-                                            <SecondaryButton
-                                                type="button"
-                                                onClick={() => updateCommentStatus(comment.id, 'visible')}
-                                                disabled={isPending}
-                                            >
+                                            <SecondaryButton type="button" onClick={() => updateCommentStatus(comment.id, 'visible')} disabled={isPending}>
                                                 보임
                                             </SecondaryButton>
                                         )}
@@ -547,12 +537,8 @@ export default function AdminPage() {
                         <PreviewBody>
                             {isLoadingPreview && <PreviewCommentSkeletonList />}
                             {!isLoadingPreview && previewError && <PreviewState role="alert">{previewError}</PreviewState>}
-                            {!isLoadingPreview && !previewError && previewComments.length === 0 && (
-                                <PreviewState>현재 공개된 댓글이 없습니다.</PreviewState>
-                            )}
-                            {!isLoadingPreview &&
-                                !previewError &&
-                                previewComments.map((comment) => <PreviewCommentItem key={comment.id} comment={comment} />)}
+                            {!isLoadingPreview && !previewError && previewComments.length === 0 && <PreviewState>현재 공개된 댓글이 없습니다.</PreviewState>}
+                            {!isLoadingPreview && !previewError && previewComments.map((comment) => <PreviewCommentItem key={comment.id} comment={comment} />)}
                         </PreviewBody>
                     </PreviewDialog>
                 </ModalOverlay>
@@ -652,6 +638,7 @@ const LoginPanel = styled.section`
     background-color: white;
     box-shadow: 0 10px 28px rgba(87, 70, 52, 0.08);
     animation: riseIn 0.4s ease both;
+    box-sizing: border-box;
 
     @keyframes riseIn {
         from {
