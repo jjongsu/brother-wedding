@@ -52,6 +52,9 @@ type ReactionResponse = {
 };
 
 const COMMENT_CLIENT_KEY_STORAGE_KEY = 'brother-wedding-comment-client-key';
+const COMMENT_SUBMIT_RETRY_MESSAGE = '축하 메시지 등록에 실패 했습니다. 잠시 후 다시 시도해주세요.';
+const REPLY_SUBMIT_RETRY_MESSAGE = '답글 등록에 실패 했습니다. 잠시 후 다시 시도해주세요.';
+const REACTION_RETRY_MESSAGE = '리액션을 반영하지 못했습니다. 잠시 후 다시 시도해주세요.';
 
 const REACTION_OPTIONS = [
     { type: 'like', icon: '👍', label: '좋아요' },
@@ -169,6 +172,22 @@ const removeCommentFromTree = (comments: GuestComment[], commentId: string): Gue
         }));
 };
 
+const findCommentInTree = (comments: GuestComment[], commentId: string): GuestComment | null => {
+    for (const comment of comments) {
+        if (comment.id === commentId) {
+            return comment;
+        }
+
+        const reply = findCommentInTree(comment.replies, commentId);
+
+        if (reply) {
+            return reply;
+        }
+    }
+
+    return null;
+};
+
 const insertCommentInTree = (comments: GuestComment[], nextComment: GuestComment): GuestComment[] => {
     if (!nextComment.parentId) {
         return [nextComment, ...comments];
@@ -187,6 +206,22 @@ const insertCommentInTree = (comments: GuestComment[], nextComment: GuestComment
             replies: insertCommentInTree(comment.replies, nextComment),
         };
     });
+};
+
+const applyOptimisticReaction = (comment: GuestComment, reaction: CommentReactionType): GuestComment => {
+    const isActive = comment.myReactions.includes(reaction);
+    const currentCount = comment.reactions[reaction] ?? 0;
+
+    return {
+        ...comment,
+        reactions: {
+            ...comment.reactions,
+            [reaction]: Math.max(0, currentCount + (isActive ? -1 : 1)),
+        },
+        myReactions: isActive
+            ? comment.myReactions.filter((myReaction) => myReaction !== reaction)
+            : [...comment.myReactions, reaction],
+    };
 };
 
 export default function CommentSection({ bgColor = 'white' }: CommentSectionProps) {
@@ -212,14 +247,14 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
     const [replyError, setReplyError] = useState('');
     const [listError, setListError] = useState('');
     const [actionError, setActionError] = useState('');
-    const [reactionError, setReactionError] = useState('');
+    const [toastMessage, setToastMessage] = useState('');
 
     const totalCommentCount = useMemo(() => countComments(comments), [comments]);
 
     const loadComments = useCallback(async () => {
         setIsLoading(true);
         setListError('');
-        setReactionError('');
+        setToastMessage('');
 
         try {
             const nextComments = await fetchComments(clientKey);
@@ -263,6 +298,18 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
             isMounted = false;
         };
     }, []);
+
+    useEffect(() => {
+        if (!toastMessage) return;
+
+        const timeoutId = window.setTimeout(() => {
+            setToastMessage('');
+        }, 3200);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [toastMessage]);
 
     const resetForm = () => {
         setAuthor('');
@@ -346,13 +393,13 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
             const body = await getResponseBody<CommentsResponse>(response);
 
             if (!response.ok || !body?.comment) {
-                throw new Error(body?.error ?? '댓글을 등록하지 못했습니다.');
+                throw new Error(body?.error ?? COMMENT_SUBMIT_RETRY_MESSAGE);
             }
 
             setComments((currentComments) => insertCommentInTree(currentComments, normalizeComment(body.comment as ApiGuestComment)));
             resetForm();
-        } catch (error) {
-            setFormError(error instanceof Error ? error.message : '댓글을 등록하지 못했습니다.');
+        } catch {
+            setFormError(COMMENT_SUBMIT_RETRY_MESSAGE);
         } finally {
             setIsSubmitting(false);
         }
@@ -394,14 +441,14 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
             const body = await getResponseBody<CommentsResponse>(response);
 
             if (!response.ok || !body?.comment) {
-                throw new Error(body?.error ?? '답글을 등록하지 못했습니다.');
+                throw new Error(body?.error ?? REPLY_SUBMIT_RETRY_MESSAGE);
             }
 
             setComments((currentComments) => insertCommentInTree(currentComments, normalizeComment(body.comment as ApiGuestComment)));
             expandReplies(parentId);
             resetReply();
-        } catch (error) {
-            setReplyError(error instanceof Error ? error.message : '답글을 등록하지 못했습니다.');
+        } catch {
+            setReplyError(REPLY_SUBMIT_RETRY_MESSAGE);
         } finally {
             setIsReplySubmitting(false);
         }
@@ -434,9 +481,20 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
         if (!clientKey) return;
 
         const pendingKey = `${commentId}:${reaction}`;
+        const previousComment = findCommentInTree(comments, commentId);
+
+        if (!previousComment) return;
+
+        const previousReactionState = {
+            reactions: previousComment.reactions,
+            myReactions: previousComment.myReactions,
+        };
 
         setPendingReaction(pendingKey);
-        setReactionError('');
+        setToastMessage('');
+        setComments((currentComments) =>
+            updateCommentInTree(currentComments, commentId, (comment) => applyOptimisticReaction(comment, reaction)),
+        );
 
         try {
             const response = await fetch(`/api/comments/${commentId}/reactions`, {
@@ -462,8 +520,16 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                     myReactions: normalizeCommentReactionList(body?.myReactions),
                 })),
             );
-        } catch (error) {
-            setReactionError(error instanceof Error ? error.message : '리액션을 반영하지 못했습니다.');
+        } catch {
+            setComments((currentComments) =>
+                updateCommentInTree(currentComments, commentId, (comment) => ({
+                    ...comment,
+                    reactions: previousReactionState.reactions,
+                    myReactions: previousReactionState.myReactions,
+                })),
+            );
+
+            setToastMessage(REACTION_RETRY_MESSAGE);
         } finally {
             setPendingReaction(null);
         }
@@ -794,7 +860,6 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                         새로고침
                     </RefreshButton>
                 </CommentToolbar>
-                {reactionError && <InlineFeedback role="alert">{reactionError}</InlineFeedback>}
 
                 <CommentList>
                     {isLoading && <StateMessage>댓글을 불러오는 중입니다.</StateMessage>}
@@ -837,6 +902,7 @@ export default function CommentSection({ bgColor = 'white' }: CommentSectionProp
                         })}
                 </CommentList>
             </CommentLayout>
+            {toastMessage && <ToastMessage role="status">{toastMessage}</ToastMessage>}
         </CommentSectionContainer>
     );
 }
@@ -1369,6 +1435,38 @@ const FeedbackText = styled.p`
     line-height: 1.6;
 `;
 
-const InlineFeedback = styled(FeedbackText)`
-    margin: -0.2rem 0 0.75rem;
+const ToastMessage = styled.div`
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 30;
+    max-width: min(21rem, calc(100vw - 2.5rem));
+    border: 1px solid rgba(185, 130, 117, 0.28);
+    border-radius: 8px;
+    padding: 0.82rem 1rem;
+    background-color: rgba(255, 253, 251, 0.96);
+    color: #9a6d63;
+    font-size: 0.84rem;
+    line-height: 1.6;
+    text-align: left;
+    box-shadow: 0 12px 28px rgba(72, 54, 40, 0.14);
+    animation: toastReveal 0.24s ease both;
+
+    @media (max-width: 520px) {
+        right: 1rem;
+        bottom: 1rem;
+        left: 1rem;
+        max-width: none;
+    }
+
+    @keyframes toastReveal {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
 `;
