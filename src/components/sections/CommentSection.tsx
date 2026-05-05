@@ -1034,7 +1034,7 @@ const TextInput = styled.input`
     ${inputBaseStyles}
     height: 2.75rem;
     padding: 0 0.85rem;
-    font-size: 0.92rem;
+    font-size: 1rem;
     box-sizing: border-box;
 `;
 
@@ -1043,7 +1043,7 @@ const MessageInput = styled.textarea`
     min-height: 7.5rem;
     resize: vertical;
     padding: 0.85rem;
-    font-size: 0.95rem;
+    font-size: 1rem;
     line-height: 1.7;
     box-sizing: border-box;
 `;
@@ -1469,7 +1469,7 @@ const PanelInput = styled.input`
     ${inputBaseStyles}
     height: 2.55rem;
     padding: 0 0.75rem;
-    font-size: 0.88rem;
+    font-size: 1rem;
     box-sizing: border-box;
 `;
 
@@ -1478,7 +1478,7 @@ const PanelTextarea = styled.textarea`
     min-height: 5.5rem;
     resize: vertical;
     padding: 0.75rem;
-    font-size: 0.9rem;
+    font-size: 1rem;
     line-height: 1.7;
     box-sizing: border-box;
 `;

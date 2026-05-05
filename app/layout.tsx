@@ -1,10 +1,16 @@
-'use client';
-
 import CacheManager from '@component/CacheManager';
 import { weddingConfig } from '@config/wedding-config';
 import StyledComponentsRegistry from '@lib/registry';
 import { GoogleAnalytics } from '@next/third-parties/google';
 import { GlobalStyle } from '@style/globalStyles';
+import type { Viewport } from 'next';
+
+export const viewport: Viewport = {
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+};
 
 export default function RootLayout({
     children,
@@ -23,7 +29,6 @@ export default function RootLayout({
                 <meta property="og:image:height" content="630" />
                 <meta property="og:image:alt" content={weddingConfig.meta.title} />
                 <meta name="robots" content="noindex, nofollow" />
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
             </head>
             <body>
                 <StyledComponentsRegistry>

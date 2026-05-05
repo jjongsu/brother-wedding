@@ -57,6 +57,9 @@ export const GlobalStyle = createGlobalStyle`
     visibility: visible;
     opacity: 1;
     font-size: 16px;
+    touch-action: pan-x pan-y;
+    overscroll-behavior: none;
+    -webkit-text-size-adjust: 100%;
   }
   
   body {
@@ -65,6 +68,17 @@ export const GlobalStyle = createGlobalStyle`
     margin: 0;
     padding: 0;
     line-height: 1.6;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  button,
+  a {
+    touch-action: manipulation;
   }
 
   body::after {

@@ -711,7 +711,7 @@ const TextInput = styled.input`
     background-color: #fffdfb;
     color: var(--text-dark);
     font-family: inherit;
-    font-size: 0.92rem;
+    font-size: 1rem;
     outline: none;
     transition:
         border-color 0.2s ease,
